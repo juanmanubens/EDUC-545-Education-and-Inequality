@@ -1,3 +1,5 @@
+NOTE: data files are excluded from this repository due to confidentiality
+
 Contains data from analytic_file.dta
   obs:         2,482                          
  vars:            32                          6 Apr 2017 17:14
