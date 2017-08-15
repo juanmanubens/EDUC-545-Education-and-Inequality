@@ -1,0 +1,153 @@
+---
+title: "EDUC 545 Final Paper"
+author: "Juan"
+date: "March 16, 2017"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr); library(leaps); library(ggplot2); library(dplyr); library(glmnet); library(ineq) ; library(corrplot); library('splines'); library("randomForest"); library("chron");library(tree); library(pROC); library(MASS); library(car); library("ResourceSelection"); library("gridExtra"); library("bestglm"); library("logisticPCA"); library("rARPACK"); library("psych"); library("nFactors");library(e1071); library("sampling"); library("data.table"); library("nnet");library("neuralnet");library("dismo");library("rpart"); library("ROCR"); library(readxl); library('latex2exp'); library(WriteXLS); library(gridExtra); library("stats") ;library("SnowballC") ;library("RColorBrewer");library(plotmo)
+knitr::opts_chunk$set(tidy=TRUE, fig.width=6,  fig.height=5, fig.align='left', dev = 'pdf')
+opts_knit$set(root.dir = "/Users/Juan//Dropbox/000SeniorSpring/STAT 471/Data")
+```
+
+```{r, eval=T, results='hide', echo=F}
+load(file="educ1.RData")
+```
+
+
+```{r, eval=F, results='hide', echo=F}
+# Custom Functions
+wnan <-function(X){(which(is.nan(X)))}
+wna <-function(X){(which(is.na(X)))}
+len  <- function(i){length(i)}
+lapply.unum <- function(X,Fx){lapply(X,Fx) %>% unlist %>%  as.numeric }
+lapply.uvec <- function(X,Fx){lapply(X,Fx) %>% unlist %>%  as.vector }
+unum <- function(X){X %>% unlist %>%  as.numeric }
+uvec <- function(X){X %>% unlist %>%  as.vector }
+unum <- function(X){X %>% unlist %>% as.numeric}
+p0lm <- function(X){paste0(X, collapse = " + " )}
+p0c <- function(X){paste0(X, collapse = " , " )}
+runcode <- function(x){ eval(parse(text=x))}
+coefnames <- function(x){paste0(names(x)[2:len(x)], collapse = " + ")}
+
+RSQ <- function(predict,actual){   1 - (sum((actual-predict )^2)/sum((actual-mean(actual))^2)) }
+RMSE <- function(predict,actual){  sqrt(mean((predict -actual)^2)) }
+
+#results.elastic.blk
+#results.elastic.blk.summary
+#results.elastic.hsp
+#results.elastic.hsp.summary
+BLK.A.lm.summary
+#BLK.A.lm.summary.df
+#BLK.B.lm.summary.df
+#BLK.C.lm.summary.df
+#BLK.D.lm.summary.df
+#BLK.ABCD.lm.summary.df
+
+#HSP.A.lm.summary.df
+#HSP.B.lm.summary.df
+#HSP.C.lm.summary.df
+#HSP.D.lm.summary.df
+#HSP.ABCD.lm.summary.df
+
+results.elastic.blk
+allelastic <- data.frame(rbind(results.elastic.blk.summary,results.elastic.hsp.summary))
+allelastic[5,] <- c(1:7)
+rownames(allelastic) <-c("RSQ.blk"  , "RMSE.blk" , "RSQ.hsp" , "RMSE.hsp", "Model")
+
+
+```
+
+```{r}
+plot(BLK.ABCD.lm)
+```
+
+```{r}
+plot(HSP.ABCD.lm)
+```
+
+
+```{r}
+#plot(HSP.ABCD.lm)
+
+
+
+#elastic.b <- data.frame(Predicted=uvec(fit.elastic.1se.blk.20.beta.p),Actual=gapblk.clean.w$gapblk_adj )
+
+#elastic.b.plot <- elastic.b %>% ggplot(aes(x=Predicted,y=Actual)) + geom_point() + geom_abline(slope = 0, intercept = 0, col = "red") + stat_smooth(method = "loess", col = "blue") + xlab("Fitted Values") + ylab("Actual Values")  + ggtitle("Model: Alpha=0.2, Y=gapblk_adj")
+
+
+elastic.h <- data.frame(Predicted=uvec(fit.elastic.1se.hsp.00.beta.p),Actual=gaphsp.clean.w$gaphsp_adj  )
+
+elastic.h.plot <- elastic.h %>% ggplot(aes(x=Predicted,y=Actual)) + geom_point() + geom_abline(slope = 0, intercept = 0, col = "red") + stat_smooth(method = "loess", col = "blue") + xlab("Fitted Values") + ylab("Actual Values")  + ggtitle("Model: Ridge (Alpha=0), Y=gaphsp_adj")
+
+```
+
+```{r}
+elastic.b.plot
+```
+
+```{r}
+elastic.h.plot
+```
+
+
+Step 1: generate weightblk = 1/(gapblkse_adj^2)
+
+*** do everything for blk/hsp separately
+*** note that observations with large gapblkse (more estimated variance for the gap) will get much smaller weights
+
+```{r, eval=F}
+weightblk <- (1/((gapblk.clean.w$gapseblk_adj)^2)) 
+weighthsp <- (1/((gaphsp.clean.w$gapsehsp_adj)^2))
+```
+
+Step 2: apply the weights to the data
+gen Xwtd_i = X_i*sqrt(weightblk)
+where X_i is a vector of all Y's and X's
+
+
+```{r, eval=F}
+for (i in 1: len(blkcols)){ gapblk.clean.w[,blkcols[i]]    <- sqrt(weightblk)*gapblk.clean.w[,blkcols[i]] } 
+for (i in 1: len(hspcols)){ gaphsp.clean.w[,hspcols[i]]    <- sqrt(weighthsp)*gaphsp.clean.w[,hspcols[i]] } 
+```
+
+Step 3: demean the data (i.e. state fixed effects)
+
+gen Xcenwtd_i = Xwtd_i - X bar_j 
+where Xwtd_i is a vector of all the weighted Y's and X's
+where X bar_j is a vector equal to the state mean (fips) for all weighted Y's and X's
+where Xcenwtd_i is the de-meaned Xwtd_i
+
+
+```{r, eval=F}
+gapblk.clean.w$fips.x  <- gapblk.clean.w$fips.x %>% as.factor 
+gaphsp.clean.w$fips.x  <- gaphsp.clean.w$fips.x %>% as.factor 
+
+fips.blk <- gapblk.clean.w$fips.x %>% unique
+fips.hsp <- gaphsp.clean.w$fips.x %>% unique
+
+for (i in 1:len(fips.blk)){
+  for (j in 1:len(blkcols)){
+    gapblk.clean.w[which(gapblk.clean.w$fips.x == fips.blk[i] ) ,blkcols[j]]  <- 
+      gapblk.clean.w[which(gapblk.clean.w$fips.x == fips.blk[i] ) ,blkcols[j]] - 
+      mean(gapblk.clean.w[which(gapblk.clean.w$fips.x == fips.blk[i] ),blkcols[j]] ) } }
+
+
+for (i in 1:len(fips.hsp)){
+  for (j in 1:len(hspcols)){
+    gaphsp.clean.w[which(gaphsp.clean.w$fips.x == fips.hsp[i] ) ,hspcols[j]]  <- 
+      gaphsp.clean.w[which(gaphsp.clean.w$fips.x == fips.hsp[i] ) ,hspcols[j]] - 
+      mean(gaphsp.clean.w[which(gaphsp.clean.w$fips.x == fips.hsp[i] ),hspcols[j]] ) } }
+
+```
+
+
+Now all of your data (both dependent and independent variables) should he de-meaned and precision weighted by the inverse variance. 
+
+You can then estimate your models using these variables 
+

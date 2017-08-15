@@ -1,0 +1,861 @@
+---
+title: "EDUC 545 Final Paper"
+author: "Juan"
+date: "March 16, 2017"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr); library(leaps); library(ggplot2); library(dplyr); library(glmnet); library(ineq) ; library(corrplot); library('splines'); library("randomForest"); library("chron");library(tree); library(pROC); library(MASS); library(car); library("ResourceSelection"); library("gridExtra"); library("bestglm"); library("logisticPCA"); library("rARPACK"); library("psych"); library("nFactors");library(e1071); library("sampling"); library("data.table"); library("nnet");library("neuralnet");library("dismo");library("rpart"); library("ROCR"); library(readxl); library('latex2exp'); library(WriteXLS); library(gridExtra); library("stats") ;library("SnowballC") ;library("RColorBrewer");library(plotmo)
+knitr::opts_chunk$set(tidy=TRUE, fig.width=6,  fig.height=5, fig.align='left', dev = 'pdf')
+opts_knit$set(root.dir = "/Users/Juan//Dropbox/000SeniorSpring/STAT 471/Data")
+```
+
+sesblk,seshsp,sesall, seswht
+
+```{r, results='hide', echo=F}
+#analytic_file - No Montana Data
+#district_cov
+#racegaps
+library(xtable)
+t1 <- xtable(finalreport.df, caption = "Model Results", digits=c(0,3,3,3))
+print.xtable(t1, type="latex", comment = getOption("xtable.comment",FALSE))
+
+```
+
+
+```{r, results='hide', echo=F}
+# Custom Functions
+wnan <-function(X){(which(is.nan(X)))}
+wna <-function(X){(which(is.na(X)))}
+len  <- function(i){length(i)}
+lapply.unum <- function(X,Fx){lapply(X,Fx) %>% unlist %>%  as.numeric }
+lapply.uvec <- function(X,Fx){lapply(X,Fx) %>% unlist %>%  as.vector }
+unum <- function(X){X %>% unlist %>%  as.numeric }
+uvec <- function(X){X %>% unlist %>%  as.vector }
+unum <- function(X){X %>% unlist %>% as.numeric}
+p0lm <- function(X){paste0(X, collapse = " + " )}
+p0c <- function(X){paste0(X, collapse = " , " )}
+runcode <- function(x){ eval(parse(text=x))}
+coefnames <- function(x){paste0(names(x)[2:len(x)], collapse = " + ")}
+
+RSQ <- function(predict,actual){   1 - (sum((actual-predict )^2)/sum((actual-mean(actual))^2)) }
+RMSE <- function(predict,actual){  sqrt(mean((predict -actual)^2)) }
+
+
+```
+
+http://rstudio-pubs-static.s3.amazonaws.com/19337_2e7f827190514c569ea136db788ce850.html
+
+
+
+```{r}
+load(file="educ1.RData")
+#district_cov$leaid <- district_cov$leaid %>% as.numeric
+#racegaps$leaid <- racegaps$leaidC %>% as.numeric
+#testDF <- merge(district_cov, racegaps, by="leaid",all.x= TRUE, all.y=TRUE)
+testDF2<- testDF[-c(which(is.na(testDF$leaname.x))),]
+#index1 <- index2
+```
+
+
+```{r}
+# Main Indexing
+blkcols <- index1[which( index1$BLK != ((index1$BLK %>% unique) %>% sort)[1] ),1] %>% unlist %>% as.vector
+hspcols <- index1[which( index1$HSP != ((index1$HSP %>% unique) %>% sort)[1] ),1] %>% unlist %>% as.vector
+
+blk.A <- index1[which( index1$BLK == ((index1$BLK %>% unique) %>% sort)[2] ),1] %>% unlist %>% as.vector
+hsp.A <- index1[which( index1$HSP == ((index1$HSP %>% unique) %>% sort)[2] ),1] %>% unlist %>% as.vector
+
+blk.B <- index1[which( index1$BLK == ((index1$BLK %>% unique) %>% sort)[3] ),1] %>% unlist %>% as.vector
+hsp.B <- index1[which( index1$HSP == ((index1$HSP %>% unique) %>% sort)[3] ),1] %>% unlist %>% as.vector
+
+blk.C <- index1[which( index1$BLK == ((index1$BLK %>% unique) %>% sort)[4] ),1] %>% unlist %>% as.vector
+hsp.C <- index1[which( index1$HSP == ((index1$HSP %>% unique) %>% sort)[4] ),1] %>% unlist %>% as.vector
+
+blk.D <- index1[which( index1$BLK == ((index1$BLK %>% unique) %>% sort)[5] ),1] %>% unlist %>% as.vector
+hsp.D <- index1[which( index1$HSP == ((index1$HSP %>% unique) %>% sort)[5] ),1] %>% unlist %>% as.vector
+
+blk.Y <- index1[which( index1$BLK == ((index1$BLK %>% unique) %>% sort)[6] ),1] %>% unlist %>% as.vector
+hsp.Y <- index1[which( index1$HSP == ((index1$HSP %>% unique) %>% sort)[6] ),1] %>% unlist %>% as.vector
+
+```
+
+```{r}
+# Cleaning
+gapblk.w <- gapblk
+gaphsp.w <- gaphsp
+
+index1[ blkcols,2] %>% uvec
+
+wnanlistB <- list(); wnanlistH <- list()
+for (i in 1: len(blkcols)){ wnanlistB[[i]] <- wnan(gapblk.w[,blkcols[i]] ) }
+for (i in 1: len(hspcols)){ wnanlistH[[i]] <- wnan(gaphsp.w[,hspcols[i]] ) }
+
+norowsBLK <- (wnanlistB %>% unlist %>% unique %>% sort) # %>% 8712
+norowsHSP <- (wnanlistH %>% unlist %>% unique %>% sort) # %>% len 265
+
+gapblk.clean.w <- gapblk.w[-norowsBLK,] 
+gaphsp.clean.w <- gaphsp.w[-norowsHSP,]
+
+sum(gapblk.clean.w$gapseblk_adj %>% is.na) # 303
+sum(gaphsp.clean.w$gapsehsp_adj %>% is.na) # 0
+
+gapblk.clean.w <- gapblk.clean.w[-(gapblk.clean.w$gapseblk_adj %>% is.na %>% which),] 
+
+
+
+
+```
+
+Step 1: generate weightblk = 1/(gapblkse_adj^2)
+
+*** do everything for blk/hsp separately
+*** note that observations with large gapblkse (more estimated variance for the gap) will get much smaller weights
+
+```{r}
+weightblk <- (1/((gapblk.clean.w$gapseblk_adj)^2)) 
+weighthsp <- (1/((gaphsp.clean.w$gapsehsp_adj)^2))
+```
+
+Step 2: apply the weights to the data
+gen Xwtd_i = X_i*sqrt(weightblk)
+where X_i is a vector of all Y's and X's
+
+
+```{r}
+for (i in 1: len(blkcols)){ gapblk.clean.w[,blkcols[i]]    <- sqrt(weightblk)*gapblk.clean.w[,blkcols[i]] } 
+for (i in 1: len(hspcols)){ gaphsp.clean.w[,hspcols[i]]    <- sqrt(weighthsp)*gaphsp.clean.w[,hspcols[i]] } 
+```
+
+Step 3: demean the data (i.e. state fixed effects)
+
+gen Xcenwtd_i = Xwtd_i - X\bar_j 
+where Xwtd_i is a vector of all the weighted Y's and X's
+where X\bar_j is a vector equal to the state mean (fips) for all weighted Y's and X's
+where Xcenwtd_i is the de-meaned Xwtd_i
+
+
+```{r}
+gapblk.clean.w$fips.x  <- gapblk.clean.w$fips.x %>% as.factor 
+gaphsp.clean.w$fips.x  <- gaphsp.clean.w$fips.x %>% as.factor 
+
+fips.blk <- gapblk.clean.w$fips.x %>% unique
+fips.hsp <- gaphsp.clean.w$fips.x %>% unique
+
+for (i in 1:len(fips.blk)){
+  for (j in 1:len(blkcols)){
+    gapblk.clean.w[which(gapblk.clean.w$fips.x == fips.blk[i] ) ,blkcols[j]]  <- gapblk.clean.w[which(gapblk.clean.w$fips.x == fips.blk[i] ) ,blkcols[j]] - mean(gapblk.clean.w[which(gapblk.clean.w$fips.x == fips.blk[i] ),blkcols[j]] ) } }
+
+
+for (i in 1:len(fips.hsp)){
+  for (j in 1:len(hspcols)){
+    gaphsp.clean.w[which(gaphsp.clean.w$fips.x == fips.hsp[i] ) ,hspcols[j]]  <- gaphsp.clean.w[which(gaphsp.clean.w$fips.x == fips.hsp[i] ) ,hspcols[j]] - mean(gaphsp.clean.w[which(gaphsp.clean.w$fips.x == fips.hsp[i] ),hspcols[j]] ) } }
+
+
+```
+
+
+Now all of your data (both dependent and independent variables) should he de-meaned and precision weighted by the inverse variance. 
+
+You can then estimate your models using these variables 
+
+
+
+
+
+```{r}
+#######          #######          #######          #######          #######          #######  
+
+# Predict gapblk_adj with X: A
+
+#(index1[blk.A,2] %>% unlist %>% as.vector %>% p0lm)
+
+BLK.A.regsubsets <- regsubsets(gapblk_adj ~ profocc_all + baplus_all + poverty517_all + singmom_all + snap_all + rent_all + samehouse_all + unemp_all + inc50all + incrat9010all + incrat9050all + incrat5010all + giniall + incVblkwht + hhsize_all + povdiff517_whtblk + unempdiff_whtblk + occdiff_whtblk + singmomdiffwhtblk + rentdiffwhtblk + samehousediffwhtblk + medvalue + medrent, data = gapblk.clean.w, method = "exhaustive")
+BLK.A.regsubsummary <- summary(BLK.A.regsubsets)
+
+
+BLK.A.coef.BIC <- (coef(BLK.A.regsubsets, which.min(BLK.A.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+BLK.A.coef.CP <- (coef(BLK.A.regsubsets, which.min(BLK.A.regsubsummary$cp))) # Model with minimum Cp
+BLK.A.coef.adjr2 <- (coef(BLK.A.regsubsets, which.max(BLK.A.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+
+coefnames(BLK.A.coef.BIC) %>% p0lm
+coefnames(BLK.A.coef.CP) %>% p0lm
+coefnames(BLK.A.coef.adjr2) %>% p0lm
+
+   
+BLK.A.lm.BIC <-  lm(gapblk_adj ~ baplus_all + poverty517_all + inc50all + giniall + incVblkwht + povdiff517_whtblk + occdiff_whtblk + singmomdiffwhtblk  , data = gapblk.clean.w) 
+BLK.A.lm.CP <-  lm(gapblk_adj ~ baplus_all + poverty517_all + inc50all + giniall + incVblkwht + povdiff517_whtblk + occdiff_whtblk + singmomdiffwhtblk  , data = gapblk.clean.w) 
+BLK.A.lm.adjr2 <-   lm(gapblk_adj ~ baplus_all + poverty517_all + inc50all + giniall + incVblkwht + povdiff517_whtblk + occdiff_whtblk + singmomdiffwhtblk   , data = gapblk.clean.w) 
+
+BLK.A.lm.BIC.summary  <- BLK.A.lm.BIC %>% summary
+BLK.A.lm.CP.summary  <- BLK.A.lm.CP %>% summary
+BLK.A.lm.adjr2.summary <- BLK.A.lm.adjr2 %>% summary 
+
+
+
+# Predict gapblk_adj with X: B
+
+(index1[blk.B,2] %>% unlist %>% as.vector %>% p0lm)
+
+BLK.B.regsubsets <- regsubsets(gapblk_adj ~ perfrl + perell + perspeced + frl + ratstutch_whtblk + flunch_all + diffexplch_blkwht + paredVblkwht + snapdiffwhtblk + privdiff_whtblk, data = gapblk.clean.w, method = "exhaustive")
+BLK.B.regsubsummary <- summary(BLK.B.regsubsets)
+
+
+
+BLK.B.coef.BIC <- (coef(BLK.B.regsubsets, which.min(BLK.B.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+BLK.B.coef.CP <- (coef(BLK.B.regsubsets, which.min(BLK.B.regsubsummary$cp))) # Model with minimum Cp
+BLK.B.coef.adjr2 <- (coef(BLK.B.regsubsets, which.max(BLK.B.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(BLK.B.coef.BIC) %>% p0lm
+coefnames(BLK.B.coef.CP) %>% p0lm
+coefnames(BLK.B.coef.adjr2) %>% p0lm
+
+   
+BLK.B.lm.BIC <- lm(gapblk_adj ~ perfrl + perell + perspeced + frl + ratstutch_whtblk + flunch_all + diffexplch_blkwht + paredVblkwht  , data = gapblk.clean.w) 
+BLK.B.lm.CP <-  lm(gapblk_adj ~ perfrl + perell + perspeced + frl + ratstutch_whtblk + flunch_all + diffexplch_blkwht + paredVblkwht  , data = gapblk.clean.w) 
+BLK.B.lm.adjr2 <-  lm(gapblk_adj ~ perfrl + perell + perspeced + frl + ratstutch_whtblk + flunch_all + diffexplch_blkwht + paredVblkwht  , data = gapblk.clean.w) 
+
+BLK.B.lm.BIC.summary  <- BLK.B.lm.BIC %>% summary
+BLK.B.lm.CP.summary  <- BLK.B.lm.CP %>% summary
+BLK.B.lm.adjr2.summary <- BLK.B.lm.adjr2 %>% summary 
+
+# Predict gapblk_adj with X: C
+
+(index1[blk.C,2] %>% unlist %>% as.vector %>% p0lm)
+
+BLK.C.regsubsets <- regsubsets(gapblk_adj ~ perind + perasn + perblk + perwht + ind + asn + blk + wht + pctenglish1 + pctenglish2 + pctenglish3 + pctforeign + pctmexico + pctpuerto + pctcuba + pctcentral + pctsouth, data = gapblk.clean.w, method = "exhaustive")
+BLK.C.regsubsummary <- summary(BLK.C.regsubsets)
+
+
+
+BLK.C.coef.BIC <- (coef(BLK.C.regsubsets, which.min(BLK.C.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+BLK.C.coef.CP <- (coef(BLK.C.regsubsets, which.min(BLK.C.regsubsummary$cp))) # Model with minimum Cp
+BLK.C.coef.adjr2 <- (coef(BLK.C.regsubsets, which.max(BLK.C.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(BLK.C.coef.BIC) %>% p0lm
+coefnames(BLK.C.coef.CP) %>% p0lm
+coefnames(BLK.C.coef.adjr2) %>% p0lm
+coefnames(BLK.C.coef.BIC)
+   
+BLK.C.lm.BIC <-  lm(gapblk_adj ~ perasn + perblk + asn + wht + pctenglish1 + pctforeign + pctmexico + pctsouth  , data = gapblk.clean.w) 
+BLK.C.lm.CP <-  lm(gapblk_adj ~ perasn + perblk + asn + wht + pctenglish1 + pctforeign + pctmexico + pctsouth  , data = gapblk.clean.w) 
+BLK.C.lm.adjr2 <-   lm(gapblk_adj ~ perasn + perblk + asn + wht + pctenglish1 + pctforeign + pctmexico + pctsouth   , data = gapblk.clean.w) 
+
+BLK.C.lm.BIC.summary  <- BLK.C.lm.BIC %>% summary
+BLK.C.lm.CP.summary  <- BLK.C.lm.CP %>% summary
+BLK.C.lm.adjr2.summary <- BLK.C.lm.adjr2 %>% summary 
+
+
+# Predict gapblk_adj with X: D
+
+(index1[blk.D, 2] %>% unlist %>% as.vector %>% p0lm)
+
+BLK.D.regsubsets <- regsubsets(gapblk_adj ~ avgrdall + avgrdwht + avgrdblk + totenrl + nsch + ncharters + elmtch + tottch + aides + corsup + elmgui + stutch_all + hswhtblk + hsflnfl + ppexp_tot + ppexp_inst + pprev_tot + percharter_all + totppe_fleslope + gslo + gshi + teenbirth_all + perfst_all + perfstdiff_whtblk + perabs_all + perabsdiff_whtblk + percharter + charter_cr + charter_na + chardiff_blk, data = gapblk.clean.w, method = "exhaustive")
+BLK.D.regsubsummary <- summary(BLK.D.regsubsets)
+
+# 
+
+BLK.D.coef.BIC <- (coef(BLK.D.regsubsets, which.min(BLK.D.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+BLK.D.coef.CP <- (coef(BLK.D.regsubsets, which.min(BLK.D.regsubsummary$cp))) # Model with minimum BIC is simpler than model with AIC 
+BLK.D.coef.adjr2 <- (coef(BLK.D.regsubsets, which.max(BLK.D.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(BLK.D.coef.BIC) %>% p0lm
+coefnames(BLK.D.coef.CP) %>% p0lm
+coefnames(BLK.D.coef.adjr2) %>% p0lm
+
+   
+BLK.D.lm.BIC <-  lm(gapblk_adj ~ aides + hsflnfl + pprev_tot + percharter_all + totppe_fleslope + gshi + teenbirth_all + perfstdiff_whtblk  , data = gapblk.clean.w) 
+BLK.D.lm.CP <-  lm(gapblk_adj ~ aides + hsflnfl + pprev_tot + percharter_all + totppe_fleslope + gshi + teenbirth_all + perfstdiff_whtblk , data = gapblk.clean.w) 
+BLK.D.lm.adjr2 <-  lm(gapblk_adj ~ aides + hsflnfl + pprev_tot + percharter_all + totppe_fleslope + gshi + teenbirth_all + perfstdiff_whtblk , data = gapblk.clean.w)
+
+BLK.D.lm.BIC.summary  <- BLK.D.lm.BIC %>% summary
+BLK.D.lm.CP.summary  <- BLK.D.lm.CP %>% summary
+BLK.D.lm.adjr2.summary <- BLK.D.lm.adjr2 %>% summary 
+
+BLK.D.lm.adjr2.summary
+
+
+
+#######          #######          #######          #######          #######          #######   
+
+# Combined Output: ABCD
+c(coefnames(BLK.A.coef.BIC),coefnames(BLK.B.coef.BIC),coefnames(BLK.C.coef.BIC) , coefnames(BLK.D.coef.BIC)) %>% p0lm
+c(coefnames(BLK.A.coef.CP),coefnames(BLK.B.coef.CP),coefnames(BLK.C.coef.CP) , coefnames(BLK.D.coef.CP)) %>% p0lm
+c(coefnames(BLK.A.coef.adjr2),coefnames(BLK.B.coef.adjr2),coefnames(BLK.C.coef.adjr2),coefnames(BLK.D.coef.adjr2))   %>% p0lm
+
+# Predict gapblk_adj with X: A,B,C,D from 2 criteria: (i) minimum BIC (ii) minimum Cp (iii) maximum adjusted R^2
+BLK.ABCD.regsubsets <- regsubsets(gapblk_adj ~ baplus_all + poverty517_all + inc50all + giniall + incVblkwht + povdiff517_whtblk + occdiff_whtblk + singmomdiffwhtblk + perfrl + perell + perspeced + frl + ratstutch_whtblk + flunch_all + diffexplch_blkwht + paredVblkwht + perasn + perblk + asn + wht + pctenglish1 + pctforeign + pctmexico + pctsouth + aides + hsflnfl + pprev_tot + percharter_all + totppe_fleslope + gshi + teenbirth_all + perfstdiff_whtblk, data = gapblk.clean.w, method = "exhaustive")
+
+# + seswht + sesblk
+
+
+BLK.ABCD.regsubsummary <- summary(BLK.ABCD.regsubsets)
+
+BLK.ABCD.coef.BIC <- (coef(BLK.ABCD.regsubsets, which.min(BLK.ABCD.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+BLK.ABCD.coef.CP <- (coef(BLK.ABCD.regsubsets, which.min(BLK.ABCD.regsubsummary$cp))) # Model with minimum BIC is simpler than model with AIC 
+BLK.ABCD.coef.adjr2 <- (coef(BLK.ABCD.regsubsets, which.max(BLK.ABCD.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(BLK.ABCD.coef.BIC) %>% p0lm
+coefnames(BLK.ABCD.coef.CP) %>% p0lm
+coefnames(BLK.ABCD.coef.adjr2) %>% p0lm
+
+
+   
+BLK.ABCD.lm.BIC <-  lm(gapblk_adj ~ baplus_all + poverty517_all + giniall + incVblkwht + diffexplch_blkwht + paredVblkwht + pctmexico + hsflnfl, data = gapblk.clean.w) 
+BLK.ABCD.lm.CP <-  lm(gapblk_adj ~ baplus_all + poverty517_all + giniall + incVblkwht + diffexplch_blkwht + paredVblkwht + pctmexico + hsflnfl, data = gapblk.clean.w) 
+BLK.ABCD.lm.adjr2 <-   lm(gapblk_adj ~ baplus_all + poverty517_all + giniall + incVblkwht + diffexplch_blkwht + paredVblkwht + pctmexico + hsflnfl, data = gapblk.clean.w) 
+
+BLK.ABCD.lm.BIC.summary  <- BLK.ABCD.lm.BIC %>% summary
+BLK.ABCD.lm.CP.summary  <- BLK.ABCD.lm.CP %>% summary
+BLK.ABCD.lm.adjr2.summary <- BLK.ABCD.lm.adjr2 %>% summary 
+BLK.ABCD.lm.adjr2.summary
+
+plot(BLK.ABCD.lm.adjr2)
+#######          #######          #######          #######          #######          #######   
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+#######          #######          #######          #######          #######          #######  
+
+# Predict gaphsp_adj with X: A
+
+(index1[hsp.A,2] %>% unlist %>% as.vector %>% p0lm)
+
+HSP.A.regsubsets <- regsubsets(gaphsp_adj ~ profocc_all + baplus_all + poverty517_all + singmom_all + snap_all + rent_all + samehouse_all + unemp_all + inc50all + incrat9010all + incrat9050all + incrat5010all + giniall + incVhspwht + hhsize_all + povdiff517_whthsp + unempdiff_whthsp + occdiff_whthsp + singmomdiffwhthsp + rentdiffwhthsp + samehousediffwhthsp + medvalue + medrent, data = gaphsp.clean.w, method = "exhaustive")
+HSP.A.regsubsummary <- summary(HSP.A.regsubsets)
+
+
+HSP.A.coef.BIC <- (coef(HSP.A.regsubsets, which.min(HSP.A.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+HSP.A.coef.CP <- (coef(HSP.A.regsubsets, which.min(HSP.A.regsubsummary$cp))) # Model with minimum Cp
+HSP.A.coef.adjr2 <- (coef(HSP.A.regsubsets, which.max(HSP.A.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+
+coefnames(HSP.A.coef.BIC) %>% p0lm
+coefnames(HSP.A.coef.CP) %>% p0lm
+coefnames(HSP.A.coef.adjr2) %>% p0lm
+
+
+HSP.A.lm.BIC <-  lm(gaphsp_adj ~ baplus_all + snap_all + inc50all + incVhspwht + hhsize_all + occdiff_whthsp + medvalue + medrent  , data = gaphsp.clean.w) 
+HSP.A.lm.CP <-  lm(gaphsp_adj ~ baplus_all + snap_all + inc50all + incVhspwht + hhsize_all + occdiff_whthsp + medvalue + medrent  , data = gaphsp.clean.w) 
+HSP.A.lm.adjr2 <-   lm(gaphsp_adj ~ baplus_all + snap_all + inc50all + incVhspwht + hhsize_all + occdiff_whthsp + medvalue + medrent   , data = gaphsp.clean.w) 
+
+HSP.A.lm.BIC.summary  <- HSP.A.lm.BIC %>% summary
+HSP.A.lm.CP.summary  <- HSP.A.lm.CP %>% summary
+HSP.A.lm.adjr2.summary <- HSP.A.lm.adjr2 %>% summary 
+
+
+# Predict gaphsp_adj with X: B
+
+(index1[hsp.B,2] %>% unlist %>% as.vector %>% p0lm)
+HSP.B.regsubsets <- regsubsets(gaphsp_adj ~ perfrl + perell + perspeced + frl + ratstutch_whthsp + flunch_all + diffexplch_hspwht + paredVhspwht + snapdiffwhthsp + privdiff_whthsp, data = gaphsp.clean.w, method = "exhaustive")
+HSP.B.regsubsummary <- summary(HSP.B.regsubsets)
+
+
+
+HSP.B.coef.BIC <- (coef(HSP.B.regsubsets, which.min(HSP.B.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+HSP.B.coef.CP <- (coef(HSP.B.regsubsets, which.min(HSP.B.regsubsummary$cp))) # Model with minimum Cp
+HSP.B.coef.adjr2 <- (coef(HSP.B.regsubsets, which.max(HSP.B.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(HSP.B.coef.BIC) %>% p0lm
+coefnames(HSP.B.coef.CP) %>% p0lm
+coefnames(HSP.B.coef.adjr2) %>% p0lm
+
+
+HSP.B.lm.BIC <-  lm(gaphsp_adj ~ perfrl + perell + perspeced + frl + ratstutch_whthsp + flunch_all + diffexplch_hspwht + paredVhspwht  , data = gaphsp.clean.w) 
+HSP.B.lm.CP <-  lm(gaphsp_adj ~ perfrl + perell + perspeced + frl + ratstutch_whthsp + flunch_all + diffexplch_hspwht + paredVhspwht  , data = gaphsp.clean.w) 
+HSP.B.lm.adjr2 <-   lm(gaphsp_adj ~ perfrl + perell + perspeced + frl + ratstutch_whthsp + flunch_all + diffexplch_hspwht + paredVhspwht   , data = gaphsp.clean.w) 
+
+HSP.B.lm.BIC.summary  <- HSP.B.lm.BIC %>% summary
+HSP.B.lm.CP.summary  <- HSP.B.lm.CP %>% summary
+HSP.B.lm.adjr2.summary <- HSP.B.lm.adjr2 %>% summary 
+
+
+# Predict gaphsp_adj with X: C
+(index1[hsp.C,2] %>% unlist %>% as.vector %>% p0lm)
+HSP.C.regsubsets <- regsubsets(gaphsp_adj ~ perind + perasn + perhsp + perwht + ind + asn + hsp + wht + pctenglish1 + pctenglish2 + pctenglish3 + pctforeign + pctmexico + pctpuerto + pctcuba + pctcentral + pctsouth, data = gaphsp.clean.w, method = "exhaustive")
+HSP.C.regsubsummary <- summary(HSP.C.regsubsets)
+
+
+
+HSP.C.coef.BIC <- (coef(HSP.C.regsubsets, which.min(HSP.C.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+HSP.C.coef.CP <- (coef(HSP.C.regsubsets, which.min(HSP.C.regsubsummary$cp))) # Model with minimum Cp
+HSP.C.coef.adjr2 <- (coef(HSP.C.regsubsets, which.max(HSP.C.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(HSP.C.coef.BIC) %>% p0lm
+coefnames(HSP.C.coef.CP) %>% p0lm
+coefnames(HSP.C.coef.adjr2) %>% p0lm
+
+
+HSP.C.lm.BIC <-  lm(gaphsp_adj ~ perind + perasn + perhsp + perwht + wht + pctenglish2 + pctenglish3  , data = gaphsp.clean.w)  ## DIFFERENT
+HSP.C.lm.CP <-  lm(gaphsp_adj ~ perind + perasn + perhsp + perwht + hsp + wht + pctenglish2 + pctenglish3  , data = gaphsp.clean.w) 
+HSP.C.lm.adjr2 <-   lm(gaphsp_adj ~ perind + perasn + perhsp + perwht + hsp + wht + pctenglish2 + pctenglish3   , data = gaphsp.clean.w) 
+
+HSP.C.lm.BIC.summary  <- HSP.C.lm.BIC %>% summary
+HSP.C.lm.CP.summary  <- HSP.C.lm.CP %>% summary
+HSP.C.lm.adjr2.summary <- HSP.C.lm.adjr2 %>% summary 
+
+# Predict gaphsp_adj with X: D
+
+
+HSP.D.regsubsets <- regsubsets(gaphsp_adj ~ avgrdall + avgrdwht + avgrdhsp + totenrl + nsch + ncharters + elmtch + tottch + aides + corsup + elmgui + stutch_all + hswhthsp + hsflnfl + ppexp_tot + ppexp_inst + pprev_tot + percharter_all + totppe_fleslope + gslo + gshi + teenbirth_all + perfst_all + perfstdiff_whthsp + perabs_all + perabsdiff_whthsp + percharter + charter_cr + charter_na + chardiff_hsp, data = gaphsp.clean.w, method = "exhaustive")
+HSP.D.regsubsummary <- summary(HSP.D.regsubsets)
+
+
+
+HSP.D.coef.BIC <- (coef(HSP.D.regsubsets, which.min(HSP.D.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+HSP.D.coef.CP <- (coef(HSP.D.regsubsets, which.min(HSP.D.regsubsummary$cp))) # Model with minimum BIC is simpler than model with AIC 
+HSP.D.coef.adjr2 <- (coef(HSP.D.regsubsets, which.max(HSP.D.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(HSP.D.coef.BIC) %>% p0lm
+coefnames(HSP.D.coef.CP) %>% p0lm
+coefnames(HSP.D.coef.adjr2) %>% p0lm
+
+
+HSP.D.lm.BIC <-  lm(gaphsp_adj ~ corsup + stutch_all + hswhthsp + ppexp_inst + totppe_fleslope + perfstdiff_whthsp + perabsdiff_whthsp + charter_na, data = gaphsp.clean.w) 
+HSP.D.lm.CP <-   lm(gaphsp_adj ~ corsup + stutch_all + hswhthsp + ppexp_inst + totppe_fleslope + perfstdiff_whthsp + perabsdiff_whthsp + charter_na, data = gaphsp.clean.w) 
+HSP.D.lm.adjr2 <-    lm(gaphsp_adj ~ corsup + stutch_all + hswhthsp + ppexp_inst + totppe_fleslope + perfstdiff_whthsp + perabsdiff_whthsp + charter_na, data = gaphsp.clean.w) 
+
+HSP.D.lm.BIC.summary  <- HSP.D.lm.BIC %>% summary
+HSP.D.lm.CP.summary  <- HSP.D.lm.CP %>% summary
+HSP.D.lm.adjr2.summary <- HSP.D.lm.adjr2 %>% summary 
+
+HSP.D.lm.adjr2.summary
+
+
+#######          #######          #######          #######          #######          #######   
+
+# Combined Output: ABCD
+
+c(coefnames(HSP.A.coef.BIC),coefnames(HSP.B.coef.BIC),coefnames(HSP.C.coef.BIC) , coefnames(HSP.D.coef.BIC))  %>% p0lm
+c(coefnames(HSP.A.coef.CP),coefnames(HSP.B.coef.CP),coefnames(HSP.C.coef.CP) , coefnames(HSP.D.coef.CP))  %>% p0lm
+c(coefnames(HSP.A.coef.adjr2),coefnames(HSP.B.coef.adjr2),coefnames(HSP.C.coef.adjr2),coefnames(HSP.D.coef.adjr2))    %>% p0lm
+
+
+# Predict gaphsp.clean.w with X: A,B,C,D from 2 criteria: (i) minimum BIC (ii) minimum Cp (iii) maximum adjusted R^2
+
+# Including hsp variable or not, makes no difference
+HSP.ABCD.regsubsets <- regsubsets(gaphsp_adj ~ baplus_all + snap_all + inc50all + incVhspwht + hhsize_all + occdiff_whthsp + medvalue + medrent + perfrl + perell + perspeced + frl + ratstutch_whthsp + flunch_all + diffexplch_hspwht + paredVhspwht + perind + perasn + perhsp + perwht + hsp + wht + pctenglish2 + pctenglish3 + corsup + stutch_all + hswhthsp + ppexp_inst + totppe_fleslope + perfstdiff_whthsp + perabsdiff_whthsp + charter_na, data = gaphsp.clean.w, method = "exhaustive")
+
+HSP.ABCD.regsubsummary <- summary(HSP.ABCD.regsubsets)
+
+HSP.ABCD.coef.BIC<- (coef(HSP.ABCD.regsubsets, which.min(HSP.ABCD.regsubsummary$bic))) # Model with minimum BIC is simpler than model with AIC 
+HSP.ABCD.coef.CP <- (coef(HSP.ABCD.regsubsets, which.min(HSP.ABCD.regsubsummary$cp))) # Model with minimum BIC is simpler than model with AIC 
+HSP.ABCD.coef.adjr2 <- (coef(HSP.ABCD.regsubsets, which.max(HSP.ABCD.regsubsummary$adjr2  ))) # Model with max Adjusted R^2 
+
+coefnames(HSP.ABCD.coef.BIC) %>% p0lm
+coefnames(HSP.ABCD.coef.CP) %>% p0lm
+coefnames(HSP.ABCD.coef.adjr2) %>% p0lm
+
+HSP.ABCD.lm.BIC <-  lm(gaphsp_adj ~ baplus_all + incVhspwht + occdiff_whthsp + perell + flunch_all + diffexplch_hspwht + paredVhspwht + charter_na, data = gaphsp.clean.w) 
+HSP.ABCD.lm.CP <-  lm(gaphsp_adj ~ baplus_all + incVhspwht + occdiff_whthsp + perell + flunch_all + diffexplch_hspwht + paredVhspwht + charter_na, data = gaphsp.clean.w) 
+HSP.ABCD.lm.adjr2 <-   lm(gaphsp_adj ~ baplus_all + incVhspwht + occdiff_whthsp + perell + flunch_all + diffexplch_hspwht + paredVhspwht + charter_na, data = gaphsp.clean.w) 
+                                          
+HSP.ABCD.lm.BIC.summary  <- HSP.ABCD.lm.BIC %>% summary
+HSP.ABCD.lm.CP.summary  <- HSP.ABCD.lm.CP %>% summary
+HSP.ABCD.lm.adjr2.summary <- HSP.ABCD.lm.adjr2 %>% summary 
+
+HSP.ABCD.lm.adjr2.summary
+
+#######          #######          #######          #######          #######          #######   
+
+
+```
+
+
+
+```{r}
+###########         ###########         ###########         ###########         ###########         ###########
+# All Identical
+BLK.A.lm.BIC.summary
+BLK.A.lm.adjr2.summary
+BLK.A.lm.CP.summary
+BLK.A.lm.summary <- BLK.A.lm.BIC.summary
+
+# All Identical
+BLK.B.lm.BIC.summary
+BLK.B.lm.adjr2.summary
+BLK.B.lm.CP.summary
+BLK.B.lm.summary <- BLK.B.lm.BIC.summary
+
+# All Identical
+BLK.C.lm.BIC.summary
+BLK.C.lm.adjr2.summary
+BLK.C.lm.CP.summary
+BLK.C.lm.summary <- BLK.C.lm.BIC.summary
+
+# All Identical
+BLK.D.lm.BIC.summary
+BLK.D.lm.adjr2.summary
+BLK.D.lm.CP.summary
+BLK.D.lm.summary <- BLK.D.lm.BIC.summary
+
+# All Identical
+BLK.ABCD.lm.BIC.summary
+BLK.ABCD.lm.adjr2.summary
+BLK.ABCD.lm.CP.summary
+BLK.ABCD.lm.summary <- BLK.ABCD.lm.BIC.summary
+BLK.ABCD.lm.summary
+
+
+BLK.A.lm.summary 
+BLK.B.lm.summary 
+BLK.C.lm.summary 
+BLK.D.lm.summary
+BLK.ABCD.lm.summary
+
+
+
+BLK.A.lm <- BLK.A.lm.BIC
+BLK.B.lm <- BLK.B.lm.BIC
+BLK.C.lm <- BLK.C.lm.BIC
+BLK.D.lm <- BLK.D.lm.BIC
+BLK.ABCD.lm <- BLK.ABCD.lm.BIC
+
+
+
+###########         ###########         ###########         ###########         ###########         ###########
+# All Identical
+HSP.A.lm.BIC.summary
+HSP.A.lm.adjr2.summary
+HSP.A.lm.CP.summary
+HSP.A.lm.summary <- HSP.A.lm.BIC.summary
+
+# All Identical
+HSP.B.lm.BIC.summary
+HSP.B.lm.adjr2.summary
+HSP.B.lm.CP.summary
+HSP.B.lm.summary <- HSP.B.lm.BIC.summary
+
+# NOT ALL IDENTICAL
+HSP.C.lm.BIC.summary # DIFFERENT
+HSP.C.lm.adjr2.summary # 
+HSP.C.lm.CP.summary
+
+HSP.C.lm.BIC.summary
+HSP.C.lm.summary <- HSP.C.lm.adjr2.summary # max adjr2 and min CP
+
+# All Identical
+HSP.D.lm.BIC.summary
+HSP.D.lm.adjr2.summary
+HSP.D.lm.CP.summary
+HSP.D.lm.summary <- HSP.D.lm.BIC.summary
+
+# All Identical
+HSP.ABCD.lm.BIC.summary
+HSP.ABCD.lm.adjr2.summary
+HSP.ABCD.lm.CP.summary
+HSP.ABCD.lm.summary <- HSP.ABCD.lm.BIC.summary
+
+HSP.A.lm.summary
+HSP.B.lm.summary
+HSP.C.lm.summary  # Only AdjR2 and CP
+HSP.D.lm.summary 
+HSP.ABCD.lm.summary
+
+
+
+HSP.A.lm <- HSP.A.lm.BIC
+HSP.B.lm <- HSP.B.lm.BIC
+HSP.C.lm.BIC
+HSP.C.lm <- HSP.C.lm.adjr2
+HSP.D.lm <- HSP.D.lm.BIC
+HSP.ABCD.lm <- HSP.ABCD.lm.BIC
+
+plot(HSP.D.lm)
+###########         ###########         ###########         ###########         ###########         ###########
+
+
+results.elastic.hsp <- data.frame(Ridge=rep(0,81),Alpha_0.2=rep(0,81),Alpha_0.4=rep(0,81),Alpha_0.6=rep(0,81),Alpha_0.8=rep(0,81),Lasso=rep(0,81))
+results.elastic.hsp$Ridge <- fit.elastic.1se.hsp.00.beta
+results.elastic.hsp$Alpha_0.2 <- fit.elastic.1se.hsp.20.beta
+results.elastic.hsp$Alpha_0.4 <- fit.elastic.1se.hsp.40.beta
+results.elastic.hsp$Alpha_0.6 <- fit.elastic.1se.hsp.60.beta
+results.elastic.hsp$Alpha_0.8 <- fit.elastic.1se.hsp.80.beta
+results.elastic.hsp$Lasso <- fit.elastic.1se.hsp.100.beta
+rownames(results.elastic.hsp) <- rownames(fit.elastic.1se.hsp.00.beta)
+
+```
+
+
+
+### Model 1 - Elastic Net / Lasso
+
+This model is fit using elasticnet. We set Alpha at 0.99 to obtain a simpler model, closer to Lasso, and set cross-validation folds at $ k = 10 $. 
+
+```{r}
+((index1[blkcols,2]) %>% unlist %>% as.vector)[1:40] %>% p0lm
+((index1[blkcols,2]) %>% unlist %>% as.vector)[40:80] %>% p0lm
+```
+
+
+```{r}
+X.blk <- as.matrix( model.matrix(gapblk_adj ~ avgrdall + avgrdwht + avgrdblk + perind + perasn + perblk + perwht + perfrl + perell + perspeced + ind + asn + blk + wht + frl + totenrl + nsch + ncharters + elmtch + tottch + aides + corsup + elmgui + stutch_all + ratstutch_whtblk + flunch_all + diffexplch_blkwht + hswhtblk + hsflnfl + ppexp_tot + ppexp_inst + pprev_tot + percharter_all + totppe_fleslope + gslo + gshi + profocc_all + baplus_all + poverty517_all + singmom_all + snap_all + rent_all + samehouse_all + unemp_all + pctenglish1 + pctenglish2 + pctenglish3 + pctforeign + pctmexico + pctpuerto + pctcuba + pctcentral + pctsouth + inc50all + incrat9010all + incrat9050all + incrat5010all + giniall + paredVblkwht + incVblkwht + teenbirth_all + perfst_all + perfstdiff_whtblk + perabs_all + perabsdiff_whtblk + hhsize_all + povdiff517_whtblk + unempdiff_whtblk + occdiff_whtblk + snapdiffwhtblk + singmomdiffwhtblk + rentdiffwhtblk + samehousediffwhtblk + privdiff_whtblk + medvalue + medrent + percharter + charter_cr + charter_na + chardiff_blk , data = gapblk.clean.w)[,-1] )
+Y.blk <-  as.matrix( gapblk.clean.w$gapblk_adj )
+
+X.hsp <- as.matrix( model.matrix(gaphsp_adj ~ avgrdall + avgrdwht + avgrdhsp + perind + perasn + perhsp + perwht + perfrl + perell + perspeced + ind + asn + hsp + wht + frl + totenrl + nsch + ncharters + elmtch + tottch + aides + corsup + elmgui + stutch_all + ratstutch_whthsp + flunch_all + diffexplch_hspwht + hswhthsp + hsflnfl + ppexp_tot + ppexp_inst + pprev_tot + percharter_all + totppe_fleslope + gslo + gshi + profocc_all + baplus_all + poverty517_all + singmom_all + snap_all + rent_all + samehouse_all + unemp_all + pctenglish1 + pctenglish2 + pctenglish3 + pctforeign + pctmexico + pctpuerto + pctcuba + pctcentral + pctsouth + inc50all + incrat9010all + incrat9050all + incrat5010all + giniall + paredVhspwht + incVhspwht + teenbirth_all + perfst_all + perfstdiff_whthsp + perabs_all + perabsdiff_whthsp + hhsize_all + povdiff517_whthsp + unempdiff_whthsp + occdiff_whthsp + snapdiffwhthsp + singmomdiffwhthsp + rentdiffwhthsp + samehousediffwhthsp + privdiff_whthsp + medvalue + medrent + percharter + charter_cr + charter_na + chardiff_hsp, data = gaphsp.clean.w)[,-1] )
+Y.hsp <-  as.matrix( gaphsp.clean.w$gaphsp_adj )
+
+
+
+set.seed(999)  
+fit.elastic.blk.00 <- cv.glmnet(X.blk, Y.blk, alpha=0, nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.blk.20 <- cv.glmnet(X.blk, Y.blk, alpha=0.2, nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.blk.40 <- cv.glmnet(X.blk, Y.blk, alpha=0.4,nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.blk.60 <- cv.glmnet(X.blk, Y.blk, alpha=0.6,nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.blk.80 <- cv.glmnet(X.blk, Y.blk, alpha=0.8,nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.blk.100 <- cv.glmnet(X.blk, Y.blk, alpha=1,nlambda = 300, type.measure="mse", nfolds=10) 
+
+#fit.elastic.1se <- cv.glmnet(X, Y, alpha=.99, family="binomial", lambda=fit.elastic.cv$lambda.1se)
+fit.elastic.1se.blk.00 <- glmnet(X.blk, Y.blk, alpha=0, lambda=fit.elastic.blk.00$lambda.1se) 
+fit.elastic.1se.blk.20 <- glmnet(X.blk, Y.blk, alpha=0.2,lambda=fit.elastic.blk.20$lambda.1se) 
+fit.elastic.1se.blk.40 <- glmnet(X.blk, Y.blk, alpha=0.4,lambda=fit.elastic.blk.40$lambda.1se) 
+fit.elastic.1se.blk.60 <- glmnet(X.blk, Y.blk, alpha=0.6,lambda=fit.elastic.blk.60$lambda.1se) 
+fit.elastic.1se.blk.80 <- glmnet(X.blk, Y.blk, alpha=0.8,lambda=fit.elastic.blk.80$lambda.1se) 
+fit.elastic.1se.blk.100 <- glmnet(X.blk, Y.blk, alpha=1,lambda=fit.elastic.blk.100$lambda.1se) 
+
+
+fit.elastic.1se.blk.00.beta <- coef(fit.elastic.1se.blk.00)
+fit.elastic.1se.blk.20.beta <- coef(fit.elastic.1se.blk.20)
+fit.elastic.1se.blk.40.beta <- coef(fit.elastic.1se.blk.40)
+fit.elastic.1se.blk.60.beta <- coef(fit.elastic.1se.blk.60)
+fit.elastic.1se.blk.80.beta <- coef(fit.elastic.1se.blk.80)
+fit.elastic.1se.blk.100.beta <- coef(fit.elastic.1se.blk.100)
+
+fit.elastic.1se.blk.00.beta <- as.matrix(fit.elastic.1se.blk.00.beta)
+fit.elastic.1se.blk.20.beta <- as.matrix(fit.elastic.1se.blk.20.beta)
+fit.elastic.1se.blk.40.beta <- as.matrix(fit.elastic.1se.blk.40.beta)
+fit.elastic.1se.blk.60.beta <- as.matrix(fit.elastic.1se.blk.60.beta)
+fit.elastic.1se.blk.80.beta <- as.matrix(fit.elastic.1se.blk.80.beta)
+fit.elastic.1se.blk.100.beta <- as.matrix(fit.elastic.1se.blk.100.beta)
+
+results.elastic.blk <- data.frame(Ridge=rep(0,81),Alpha_0.2=rep(0,81),Alpha_0.4=rep(0,81),Alpha_0.6=rep(0,81),Alpha_0.8=rep(0,81),Lasso=rep(0,81))
+results.elastic.blk$Ridge <- fit.elastic.1se.blk.00.beta
+results.elastic.blk$Alpha_0.2 <- fit.elastic.1se.blk.20.beta
+results.elastic.blk$Alpha_0.4 <- fit.elastic.1se.blk.40.beta
+results.elastic.blk$Alpha_0.6 <- fit.elastic.1se.blk.60.beta
+results.elastic.blk$Alpha_0.8 <- fit.elastic.1se.blk.80.beta
+results.elastic.blk$Lasso <- fit.elastic.1se.blk.100.beta
+rownames(results.elastic.blk) <- rownames(fit.elastic.1se.blk.00.beta)
+
+
+fit.elastic.1se.blk.00.beta.p <- predict(fit.elastic.1se.blk.00, newx = X.blk, s="lambda.min")
+fit.elastic.1se.blk.20.beta.p <- predict(fit.elastic.1se.blk.20, newx = X.blk, s="lambda.min")
+fit.elastic.1se.blk.40.beta.p <- predict(fit.elastic.1se.blk.40, newx = X.blk, s="lambda.min")
+fit.elastic.1se.blk.60.beta.p <- predict(fit.elastic.1se.blk.60, newx = X.blk, s="lambda.min")
+fit.elastic.1se.blk.80.beta.p <- predict(fit.elastic.1se.blk.80, newx = X.blk, s="lambda.min")
+fit.elastic.1se.blk.100.beta.p <- predict(fit.elastic.1se.blk.100, newx = X.blk, s="lambda.min")
+
+
+results.elastic.blk.summary <- data.frame(Ridge=rep(0,2),Alpha_0.2=rep(0,2),Alpha_0.4=rep(0,2),Alpha_0.6=rep(0,2),Alpha_0.8=rep(0,2),Lasso=rep(0,2))
+rownames(results.elastic.blk.summary) <- c("RSQ","RMSE")
+
+rsq.00.blk <- RSQ(fit.elastic.1se.blk.00.beta.p,gapblk.clean.w$gapblk_adj) #0.9322232
+rsq.20.blk <- RSQ(fit.elastic.1se.blk.20.beta.p,gapblk.clean.w$gapblk_adj) #0.9350991
+rsq.40.blk <- RSQ(fit.elastic.1se.blk.40.beta.p,gapblk.clean.w$gapblk_adj) #0.9363649
+rsq.60.blk <- RSQ(fit.elastic.1se.blk.60.beta.p,gapblk.clean.w$gapblk_adj) #0.9330201
+rsq.80.blk <- RSQ(fit.elastic.1se.blk.80.beta.p,gapblk.clean.w$gapblk_adj) #0.9363295
+rsq.100.blk <- RSQ(fit.elastic.1se.blk.100.beta.p,gapblk.clean.w$gapblk_adj) #0.9365197
+
+RMSE.00.blk <- RMSE(fit.elastic.1se.blk.00.beta.p,gapblk.clean.w$gapblk_adj) #5.159679
+RMSE.20.blk <- RMSE(fit.elastic.1se.blk.20.beta.p,gapblk.clean.w$gapblk_adj) #5.049024
+RMSE.40.blk <- RMSE(fit.elastic.1se.blk.40.beta.p,gapblk.clean.w$gapblk_adj) #4.999546
+RMSE.60.blk <- RMSE(fit.elastic.1se.blk.60.beta.p,gapblk.clean.w$gapblk_adj) #5.129257
+RMSE.80.blk <- RMSE(fit.elastic.1se.blk.80.beta.p,gapblk.clean.w$gapblk_adj) #5.000936
+RMSE.100.blk <- RMSE(fit.elastic.1se.blk.100.beta.p,gapblk.clean.w$gapblk_adj) #4.993462
+
+results.elastic.blk.summary$Ridge <- c(rsq.00.blk,RMSE.00.blk)
+results.elastic.blk.summary$Alpha_0.2 <- c(rsq.20.blk,RMSE.20.blk)
+results.elastic.blk.summary$Alpha_0.4 <- c(rsq.40.blk,RMSE.40.blk)
+results.elastic.blk.summary$Alpha_0.6 <- c(rsq.60.blk,RMSE.60.blk)
+results.elastic.blk.summary$Alpha_0.8 <- c(rsq.80.blk,RMSE.80.blk)
+results.elastic.blk.summary$Lasso <- c(rsq.100.blk,RMSE.100.blk)
+
+
+
+##########           ##########           ##########           ##########           ##########           
+
+fit.elastic.hsp.00 <- cv.glmnet(X.hsp, Y.hsp, alpha=0, nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.hsp.20 <- cv.glmnet(X.hsp, Y.hsp, alpha=0.2, nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.hsp.40 <- cv.glmnet(X.hsp, Y.hsp, alpha=0.4,nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.hsp.60 <- cv.glmnet(X.hsp, Y.hsp, alpha=0.6,nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.hsp.80 <- cv.glmnet(X.hsp, Y.hsp, alpha=0.8,nlambda = 300, type.measure="mse", nfolds=10) 
+fit.elastic.hsp.100 <- cv.glmnet(X.hsp, Y.hsp, alpha=1,nlambda = 300, type.measure="mse", nfolds=10) 
+
+#fit.elastic.1se <- cv.glmnet(X, Y, alpha=.99, family="binomial", lambda=fit.elastic.cv$lambda.1se)
+fit.elastic.1se.hsp.00 <- glmnet(X.hsp, Y.hsp, alpha=0, lambda=fit.elastic.hsp.00$lambda.1se) 
+fit.elastic.1se.hsp.20 <- glmnet(X.hsp, Y.hsp, alpha=0.2,lambda=fit.elastic.hsp.20$lambda.1se) 
+fit.elastic.1se.hsp.40 <- glmnet(X.hsp, Y.hsp, alpha=0.4,lambda=fit.elastic.hsp.40$lambda.1se) 
+fit.elastic.1se.hsp.60 <- glmnet(X.hsp, Y.hsp, alpha=0.6,lambda=fit.elastic.hsp.60$lambda.1se) 
+fit.elastic.1se.hsp.80 <- glmnet(X.hsp, Y.hsp, alpha=0.8,lambda=fit.elastic.hsp.80$lambda.1se) 
+fit.elastic.1se.hsp.100 <- glmnet(X.hsp, Y.hsp, alpha=1,lambda=fit.elastic.hsp.100$lambda.1se) 
+
+
+fit.elastic.1se.hsp.00.beta <- coef(fit.elastic.1se.hsp.00)
+fit.elastic.1se.hsp.20.beta <- coef(fit.elastic.1se.hsp.20)
+fit.elastic.1se.hsp.40.beta <- coef(fit.elastic.1se.hsp.40)
+fit.elastic.1se.hsp.60.beta <- coef(fit.elastic.1se.hsp.60)
+fit.elastic.1se.hsp.80.beta <- coef(fit.elastic.1se.hsp.80)
+fit.elastic.1se.hsp.100.beta <- coef(fit.elastic.1se.hsp.100)
+
+fit.elastic.1se.hsp.00.beta <- as.matrix(fit.elastic.1se.hsp.00.beta)
+fit.elastic.1se.hsp.20.beta <- as.matrix(fit.elastic.1se.hsp.20.beta)
+fit.elastic.1se.hsp.40.beta <- as.matrix(fit.elastic.1se.hsp.40.beta)
+fit.elastic.1se.hsp.60.beta <- as.matrix(fit.elastic.1se.hsp.60.beta)
+fit.elastic.1se.hsp.80.beta <- as.matrix(fit.elastic.1se.hsp.80.beta)
+fit.elastic.1se.hsp.100.beta <- as.matrix(fit.elastic.1se.hsp.100.beta)
+
+results.elastic.hsp <- data.frame(Ridge=rep(0,81),Alpha_0.2=rep(0,81),Alpha_0.4=rep(0,81),Alpha_0.6=rep(0,81),Alpha_0.8=rep(0,81),Lasso=rep(0,81))
+results.elastic.hsp$Ridge <- fit.elastic.1se.hsp.00.beta
+results.elastic.hsp$Alpha_0.2 <- fit.elastic.1se.hsp.20.beta
+results.elastic.hsp$Alpha_0.4 <- fit.elastic.1se.hsp.40.beta
+results.elastic.hsp$Alpha_0.6 <- fit.elastic.1se.hsp.60.beta
+results.elastic.hsp$Alpha_0.8 <- fit.elastic.1se.hsp.80.beta
+results.elastic.hsp$Lasso <- fit.elastic.1se.hsp.100.beta
+rownames(results.elastic.hsp) <- rownames(fit.elastic.1se.hsp.00.beta)
+  
+  
+fit.elastic.1se.hsp.00.beta.p <- predict(fit.elastic.1se.hsp.00, newx = X.hsp, s="lambda.min")
+fit.elastic.1se.hsp.20.beta.p <- predict(fit.elastic.1se.hsp.20, newx = X.hsp, s="lambda.min")
+fit.elastic.1se.hsp.40.beta.p <- predict(fit.elastic.1se.hsp.40, newx = X.hsp, s="lambda.min")
+fit.elastic.1se.hsp.60.beta.p <- predict(fit.elastic.1se.hsp.60, newx = X.hsp, s="lambda.min")
+fit.elastic.1se.hsp.80.beta.p <- predict(fit.elastic.1se.hsp.80, newx = X.hsp, s="lambda.min")
+fit.elastic.1se.hsp.100.beta.p <- predict(fit.elastic.1se.hsp.100, newx = X.hsp, s="lambda.min")
+
+
+RSQ(fit.elastic.1se.hsp.00.beta.p,gaphsp.clean.w$gaphsp_adj) #0.8556033
+RSQ(fit.elastic.1se.hsp.20.beta.p,gaphsp.clean.w$gaphsp_adj) #0.8593463
+RSQ(fit.elastic.1se.hsp.40.beta.p,gaphsp.clean.w$gaphsp_adj) #0.8557962
+RSQ(fit.elastic.1se.hsp.60.beta.p,gaphsp.clean.w$gaphsp_adj) #0.8587171
+RSQ(fit.elastic.1se.hsp.80.beta.p,gaphsp.clean.w$gaphsp_adj) #0.8558515
+RSQ(fit.elastic.1se.hsp.100.beta.p,gaphsp.clean.w$gaphsp_adj) #0.8568488
+
+RMSE(fit.elastic.1se.hsp.00.beta.p,gaphsp.clean.w$gaphsp_adj) #3.548478
+RMSE(fit.elastic.1se.hsp.20.beta.p,gaphsp.clean.w$gaphsp_adj) #3.502185
+RMSE(fit.elastic.1se.hsp.40.beta.p,gaphsp.clean.w$gaphsp_adj) #3.546107
+RMSE(fit.elastic.1se.hsp.60.beta.p,gaphsp.clean.w$gaphsp_adj) #3.51001
+RMSE(fit.elastic.1se.hsp.80.beta.p,gaphsp.clean.w$gaphsp_adj) #3.545427
+RMSE(fit.elastic.1se.hsp.100.beta.p,gaphsp.clean.w$gaphsp_adj) #3.533141
+
+
+
+results.elastic.hsp.summary <- data.frame(Ridge=rep(0,2),Alpha_0.2=rep(0,2),Alpha_0.4=rep(0,2),Alpha_0.6=rep(0,2),Alpha_0.8=rep(0,2),Lasso=rep(0,2))
+rownames(results.elastic.hsp.summary) <- c("RSQ","RMSE")
+
+rsq.00.hsp <- RSQ(fit.elastic.1se.hsp.00.beta.p,gaphsp.clean.w$gaphsp_adj) #0.9322232
+rsq.20.hsp <- RSQ(fit.elastic.1se.hsp.20.beta.p,gaphsp.clean.w$gaphsp_adj) #0.9350991
+rsq.40.hsp <- RSQ(fit.elastic.1se.hsp.40.beta.p,gaphsp.clean.w$gaphsp_adj) #0.9363649
+rsq.60.hsp <- RSQ(fit.elastic.1se.hsp.60.beta.p,gaphsp.clean.w$gaphsp_adj) #0.9330201
+rsq.80.hsp <- RSQ(fit.elastic.1se.hsp.80.beta.p,gaphsp.clean.w$gaphsp_adj) #0.9363295
+rsq.100.hsp <- RSQ(fit.elastic.1se.hsp.100.beta.p,gaphsp.clean.w$gaphsp_adj) #0.9365197
+
+RMSE.00.hsp <- RMSE(fit.elastic.1se.hsp.00.beta.p,gaphsp.clean.w$gaphsp_adj) #5.159679
+RMSE.20.hsp <- RMSE(fit.elastic.1se.hsp.20.beta.p,gaphsp.clean.w$gaphsp_adj) #5.049024
+RMSE.40.hsp <- RMSE(fit.elastic.1se.hsp.40.beta.p,gaphsp.clean.w$gaphsp_adj) #4.999546
+RMSE.60.hsp <- RMSE(fit.elastic.1se.hsp.60.beta.p,gaphsp.clean.w$gaphsp_adj) #5.129257
+RMSE.80.hsp <- RMSE(fit.elastic.1se.hsp.80.beta.p,gaphsp.clean.w$gaphsp_adj) #5.000936
+RMSE.100.hsp <- RMSE(fit.elastic.1se.hsp.100.beta.p,gaphsp.clean.w$gaphsp_adj) #4.993462
+
+results.elastic.hsp.summary$Ridge <- c(rsq.00.hsp,RMSE.00.hsp)
+results.elastic.hsp.summary$Alpha_0.2 <- c(rsq.20.hsp,RMSE.20.hsp)
+results.elastic.hsp.summary$Alpha_0.4 <- c(rsq.40.hsp,RMSE.40.hsp)
+results.elastic.hsp.summary$Alpha_0.6 <- c(rsq.60.hsp,RMSE.60.hsp)
+results.elastic.hsp.summary$Alpha_0.8 <- c(rsq.80.hsp,RMSE.80.hsp)
+results.elastic.hsp.summary$Lasso <- c(rsq.100.hsp,RMSE.100.hsp)
+
+
+
+results.elastic.blk$Variable <-  rownames(results.elastic.blk)
+results.elastic.blk.summary$Variable <-  rownames(results.elastic.blk.summary)
+results.elastic.hsp$Variable <-  rownames(results.elastic.hsp)
+results.elastic.hsp.summary$Variable <-  rownames(results.elastic.hsp.summary)
+
+WriteXLS(results.elastic.blk, ExcelFileName = "results.elastic.blk.xls")
+WriteXLS(results.elastic.blk.summary, ExcelFileName = "results.elastic.blk.summary.xls")
+WriteXLS(results.elastic.hsp, ExcelFileName = "results.elastic.hsp.xls")
+WriteXLS(results.elastic.hsp.summary, ExcelFileName = "results.elastic.hsp.summary.xls")
+
+
+
+```
+
+
+
+
+
+
+```{r}
+## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## 
+
+## MA
+
+HSP.D.coef.BIC %>% names
+
+rownames(results.elastic.hsp)
+
+BLK.A.lm.summary$adj.r.squared
+
+RI.blk <- rownames(results.elastic.blk)
+RI.hsp <- rownames(results.elastic.hsp)
+
+BLK.A.lm.summary.df <- BLK.A.lm.summary$coefficients %>% as.data.frame
+BLK.B.lm.summary.df <- BLK.B.lm.summary$coefficients %>% as.data.frame
+BLK.C.lm.summary.df <- BLK.C.lm.summary$coefficients %>% as.data.frame
+BLK.D.lm.summary.df <- BLK.D.lm.summary$coefficients %>% as.data.frame
+BLK.ABCD.lm.summary.df <- BLK.ABCD.lm.summary$coefficients %>% as.data.frame
+
+
+HSP.A.lm.summary.df <- HSP.A.lm.summary$coefficients %>% as.data.frame
+HSP.B.lm.summary.df <- HSP.B.lm.summary$coefficients %>% as.data.frame
+HSP.C.lm.summary.df <- HSP.C.lm.summary$coefficients %>% as.data.frame
+HSP.D.lm.summary.df <- HSP.D.lm.summary$coefficients %>% as.data.frame
+HSP.ABCD.lm.summary.df <- HSP.ABCD.lm.summary$coefficients %>% as.data.frame
+
+BLK.A.lm.summary.df$Variable <-rownames(BLK.A.lm.summary.df)
+BLK.B.lm.summary.df$Variable <-rownames(BLK.B.lm.summary.df)
+BLK.C.lm.summary.df$Variable <-rownames(BLK.C.lm.summary.df)
+BLK.D.lm.summary.df$Variable <-rownames(BLK.D.lm.summary.df)
+BLK.ABCD.lm.summary.df$Variable <-rownames(BLK.ABCD.lm.summary.df)
+
+BLK.A.lm.summary.df$Variable <-rownames(BLK.A.lm.summary.df)
+BLK.B.lm.summary.df$Variable <-rownames(BLK.B.lm.summary.df)
+BLK.C.lm.summary.df$Variable <-rownames(BLK.C.lm.summary.df)
+BLK.D.lm.summary.df$Variable <-rownames(BLK.D.lm.summary.df)
+BLK.ABCD.lm.summary.df$Variable <-rownames(BLK.ABCD.lm.summary.df)
+
+HSP.A.lm.summary.df$Variable <-rownames(HSP.A.lm.summary.df)
+HSP.B.lm.summary.df$Variable <-rownames(HSP.B.lm.summary.df)
+HSP.C.lm.summary.df$Variable <-rownames(HSP.C.lm.summary.df)
+HSP.D.lm.summary.df$Variable <-rownames(HSP.D.lm.summary.df)
+HSP.ABCD.lm.summary.df$Variable <-rownames(HSP.ABCD.lm.summary.df)
+
+
+WriteXLS(BLK.A.lm.summary.df,ExcelFileName = "BLK.A.lm.summary.df.xls")
+WriteXLS(BLK.B.lm.summary.df,ExcelFileName = "BLK.B.lm.summary.df.xls")
+WriteXLS(BLK.C.lm.summary.df,ExcelFileName = "BLK.C.lm.summary.df.xls")
+WriteXLS(BLK.D.lm.summary.df,ExcelFileName = "BLK.D.lm.summary.df.xls")
+WriteXLS(BLK.ABCD.lm.summary.df,ExcelFileName = "BLK.ABCD.lm.summary.df.xls")
+
+WriteXLS(HSP.A.lm.summary.df,ExcelFileName = "HSP.A.lm.summary.df.xls")
+WriteXLS(HSP.B.lm.summary.df,ExcelFileName = "HSP.B.lm.summary.df.xls")
+WriteXLS(HSP.C.lm.summary.df,ExcelFileName = "HSP.C.lm.summary.df.xls")
+WriteXLS(HSP.D.lm.summary.df,ExcelFileName = "HSP.D.lm.summary.df.xls")
+WriteXLS(HSP.ABCD.lm.summary.df,ExcelFileName = "HSP.ABCD.lm.summary.df.xls")
+
+
+```
+
+
