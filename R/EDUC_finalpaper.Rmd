@@ -11,7 +11,7 @@ output:
 ```{r setup, include=FALSE}
 library(knitr); library(leaps); library(ggplot2); library(dplyr); library(glmnet); library(ineq) ; library(corrplot); library('splines'); library("randomForest"); library("chron");library(tree); library(pROC); library(MASS); library(car); library("ResourceSelection"); library("gridExtra"); library("bestglm"); library("logisticPCA"); library("rARPACK"); library("psych"); library("nFactors");library(e1071); library("sampling"); library("data.table"); library("nnet");library("neuralnet");library("dismo");library("rpart"); library("ROCR"); library(readxl); library('latex2exp'); library(WriteXLS); library(gridExtra); library("stats") ;library("SnowballC") ;library("RColorBrewer");library(plotmo)
 knitr::opts_chunk$set(tidy=TRUE, fig.width=6,  fig.height=5, fig.align='left', dev = 'pdf')
-opts_knit$set(root.dir = "/Users/Juan//Dropbox/000SeniorSpring/STAT 471/Data")
+opts_knit$set(root.dir = "")
 ```
 
 sesblk,seshsp,sesall, seswht
